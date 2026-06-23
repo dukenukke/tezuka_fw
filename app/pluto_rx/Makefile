@@ -9,15 +9,20 @@ DESTDIR?=$(out)
 #DESTDIR?=/usr/local
 
 TARGET = plutorx
+WS_TARGET = plutorx_ws
 
 $(TARGET): $(TARGET).c
 	$(CC) $(TARGET).c $(CFLAGS) $(LDFLAGS) -o $(TARGET)
 
-all: $(TARGET)
+$(WS_TARGET): $(WS_TARGET).c
+	$(CC) $(WS_TARGET).c $(CFLAGS) $(LDFLAGS) -lcivetweb -lpthread -o $(WS_TARGET)
 
-install: $(TARGET)
+all: $(TARGET) $(WS_TARGET)
+
+install: $(TARGET) $(WS_TARGET)
 	install -d -m 0755 $(DESTDIR)/bin
 	install -m 0755 $(TARGET) $(DESTDIR)/bin/$(TARGET)
+	install -m 0755 $(WS_TARGET) $(DESTDIR)/bin/$(WS_TARGET)
 
 clean:
-	$(RM) $(TARGET)
+	$(RM) $(TARGET) $(WS_TARGET)

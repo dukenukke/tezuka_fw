@@ -84,7 +84,7 @@ Enjoy extra features out-of-the-box with custom-tailored software branches:
 ### Setup Environment (Debian/Ubuntu)
 ```bash
 # Install mandatory dependencies
-sudo apt install pkg-config libssl-dev libclang-dev jq
+sudo apt install pkg-config libssl-dev libclang-dev jq bootgen-xlnx
 
 # Clone the repository & pull Buildroot
 git clone [https://github.com/F5OEO/tezuka_fw](https://github.com/F5OEO/tezuka_fw)
@@ -118,6 +118,27 @@ make pluto_maiasdr_defconfig && make
 For a list all supported boards run:
 ```bash
 ./build.sh -h
+```
+
+### Upgrade Original PlutoSDR
+After building the target, use the helper script to copy the generated
+`pluto.frm` from that board output to the mounted Pluto USB drive. The script
+then ejects/unmounts the drive to trigger the update:
+
+```bash
+tools/upgrade_pluto.sh
+```
+
+For example, to upgrade from the `nano` build output:
+
+```bash
+tools/upgrade_pluto.sh --board nano --mount /media/$USER/PlutoSDR
+```
+
+You can also pass a specific artifact:
+
+```bash
+tools/upgrade_pluto.sh --file build/pluto.zip --mount /media/$USER/PlutoSDR
 ```
 
 ### Building on WSL2 

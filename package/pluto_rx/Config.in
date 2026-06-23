@@ -1,0 +1,14 @@
+config BR2_PACKAGE_PLUTO_RX
+	bool "pluto_rx tools"
+	depends on BR2_TOOLCHAIN_HAS_THREADS
+	select BR2_PACKAGE_LIBIIO
+	select BR2_PACKAGE_CIVETWEBWS
+	select BR2_PACKAGE_CIVETWEBWS_LIB
+	help
+	  Build the Pluto RX sample streaming tools.
+
+	  This installs plutorx and plutorx_ws. plutorx_ws streams CS8 IQ
+	  samples as binary WebSocket frames for browser or Android clients.
+
+comment "pluto_rx tools need a toolchain w/ threads"
+	depends on !BR2_TOOLCHAIN_HAS_THREADS
