@@ -21,4 +21,10 @@ define PLUTO_RX_INSTALL_TARGET_CMDS
 		DESTDIR="$(TARGET_DIR)/usr" install
 endef
 
+define PLUTO_RX_INSTALL_INIT_SYSV
+	$(INSTALL) -D -m 0755 \
+		$(BR2_EXTERNAL_PLUTOSDR_PATH)/package/pluto_rx/S61plutorx-ws \
+		$(TARGET_DIR)/etc/init.d/S61plutorx-ws
+endef
+
 $(eval $(generic-package))

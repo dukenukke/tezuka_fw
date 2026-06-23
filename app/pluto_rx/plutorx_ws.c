@@ -5,6 +5,8 @@
  * CivetWeb only handles the WebSocket framing.
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
@@ -17,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "civetweb.h"
@@ -161,6 +164,15 @@ static bool has_clients(void)
     pthread_mutex_unlock(&clients_lock);
 
     return active;
+}
+
+static void sleep_ms(long milliseconds)
+{
+    struct timespec delay;
+
+    delay.tv_sec = milliseconds / 1000;
+    delay.tv_nsec = (milliseconds % 1000) * 1000000L;
+    nanosleep(&delay, NULL);
 }
 
 static void drop_client(struct mg_connection *conn)
@@ -380,7 +392,7 @@ int main(int argc, char **argv)
 
     while (!want_quit) {
         if (!has_clients()) {
-            usleep(20000);
+            sleep_ms(20);
             continue;
         }
 
