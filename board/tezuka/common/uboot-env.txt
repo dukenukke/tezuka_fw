@@ -164,13 +164,24 @@ pl_init=\
 
 qspiboot_bootenv=sf probe && sf read ${extraenv_load_address} 0x100000 0x20000;
 qspiboot_extraenv=sf read ${extraenv_load_address} 0xFF000 0x1000;
+set_console_args=\
+  if test "${model}" = "Nano PlutoSDR (Z7010/AD9361)"; then \
+    setenv console_arg; setenv earlyprintk_arg; setenv earlycon_arg; \
+  elif test "${model}" = "Nano SDR Board (7010-AD9363)"; then \
+    setenv console_arg; setenv earlyprintk_arg; setenv earlycon_arg; \
+  else \
+    setenv console_arg console=ttyPS0,115200; \
+    setenv earlyprintk_arg earlyprintk; \
+    setenv earlycon_arg earlycon; \
+  fi
 qspiboot=\
   adi_hwref; \
   echo Copying Linux from QSPI flash to RAM... && run read_sf && if run adi_loadvals; then \
     echo Loaded AD936x refclk frequency and model into devicetree; \
   fi; \
   run pl_init; \
-  setenv bootargs console=ttyPS0,115200 maxcpus=${maxcpus} rootfstype=ramfs root=/dev/ram0 rw earlyprintk clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
+  run set_console_args; \
+  setenv bootargs ${console_arg} maxcpus=${maxcpus} rootfstype=ramfs root=/dev/ram0 rw ${earlyprintk_arg} clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
   && bootm ${fit_load_address}#${fit_config} || echo BOOT failed entering DFU mode && run dfu_sf
 
 qspiboot_verbose=\
@@ -179,7 +190,8 @@ qspiboot_verbose=\
     echo Loaded AD936x refclk frequency and model into devicetree; \
   fi; \
   run pl_init; \
-  setenv bootargs console=ttyPS0,115200 maxcpus=${maxcpus} rootfstype=ramfs root=/dev/ram0 rw earlyprintk clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
+  run set_console_args; \
+  setenv bootargs ${console_arg} maxcpus=${maxcpus} rootfstype=ramfs root=/dev/ram0 rw ${earlyprintk_arg} clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
   && bootm ${fit_load_address}#${fit_config} || echo BOOT failed entering DFU mode && run dfu_sf
 
 qspiboot_silent=\
@@ -188,7 +200,8 @@ qspiboot_silent=\
   set stdout nulldev; \
   run read_sf; run adi_loadvals; run qspiboot_extraenv; \
   run pl_init; \
-  setenv bootargs console=ttyPS0,115200 maxcpus=${maxcpus} rootfstype=ramfs root=/dev/ram0 rw quiet loglevel=4 clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
+  run set_console_args; \
+  setenv bootargs ${console_arg} maxcpus=${maxcpus} rootfstype=ramfs root=/dev/ram0 rw quiet loglevel=4 clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
   && bootm ${fit_load_address}#${fit_config} || set stdout serial@e0000000;
 
 ramboot_verbose=\
@@ -196,7 +209,8 @@ ramboot_verbose=\
   echo Copying Linux from DFU to RAM... && run dfu_ram;if run adi_loadvals; then \
     echo Loaded AD936x refclk frequency and model into devicetree; \
   fi; \
-  setenv bootargs console=ttyPS0,115200 maxcpus=${maxcpus} rootfstype=ramfs root=/dev/ram0 rw earlyprintk clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
+  run set_console_args; \
+  setenv bootargs ${console_arg} maxcpus=${maxcpus} rootfstype=ramfs root=/dev/ram0 rw ${earlyprintk_arg} clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
   && bootm ${fit_load_address}#${fit_config}
 
 ramdisk_image=uramdisk.image.xz
@@ -220,7 +234,8 @@ sdboot_ram=\
     && load mmc 0 ${devicetree_load_address} ${devicetree_image} \
     && load mmc 0 ${ramdisk_load_address} ${ramdisk_image} \
     && run adi_loadvals; \
-    setenv bootargs console=ttyPS0,115200 rootfstype=ramfs root=/dev/ram0 rw rootwait earlycon clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='"\'${uboot-version}'\"' \
+    run set_console_args; \
+    setenv bootargs ${console_arg} rootfstype=ramfs root=/dev/ram0 rw rootwait ${earlycon_arg} clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='"\'${uboot-version}'\"' \
     && bootm ${fit_load_address} ${ramdisk_load_address} ${devicetree_load_address}; \
   fi
 
@@ -232,7 +247,8 @@ sdboot_kuiper=if mmcinfo; then \
     && load mmc 0 ${fit_load_address} ${kernel_image} \
     && load mmc 0 ${devicetree_load_address} ${devicetree_image} \
     && run adi_loadvals; \
-    setenv bootargs console=ttyPS0,115200 rootfstype=ext4 root=/dev/mmcblk0p2 rootwait rw earlycon clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
+    run set_console_args; \
+    setenv bootargs ${console_arg} rootfstype=ext4 root=/dev/mmcblk0p2 rootwait rw ${earlycon_arg} clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='\"'${uboot-version}'\"' \
     && bootm ${fit_load_address} - ${devicetree_load_address}; \
     fi
 
@@ -261,6 +277,7 @@ usbboot=\
     && run read_sf \
     && run adi_loadvals; \
     run pl_init; \
-    setenv bootargs console=ttyPS0,115200 rootfstype=ramfs root=/dev/ram0 rw rootwait earlycon clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='"\'${uboot-version}'\"' \
+    run set_console_args; \
+    setenv bootargs ${console_arg} rootfstype=ramfs root=/dev/ram0 rw rootwait ${earlycon_arg} clk_ignore_unused cpuidle.off=1 uio_pdrv_genirq.of_id=uio_pdrv_genirq UBOOT_MODEBOOT=$modeboot UBOOT_VERSION='"\'${uboot-version}'\"' \
     && bootm ${fit_load_address} ${ramdisk_load_address} ${devicetree_load_address}; \
   fi

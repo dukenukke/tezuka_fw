@@ -1,0 +1,36 @@
+#!/bin/sh
+
+DAEMON=/usr/bin/serial_ws
+PIDFILE=/var/run/serial-ws.pid
+
+case "$1" in
+	start)
+		printf 'Starting Pluto WebSocket/UART bridge: '
+		# Keep ttyGS0 as the emergency USB login console. Only the UART getty
+		# must be removed because this daemon owns ttyPS0 exclusively.
+		sed -i '/^ttyPS0::respawn:/d' /etc/inittab
+		if start-stop-daemon -S -b -q -m -p "$PIDFILE" -x "$DAEMON" -- \
+			-d /dev/ttyPS0 -p 7683 -r /serial; then
+			echo OK
+		else
+			echo FAIL
+		fi
+		;;
+	stop)
+		printf 'Stopping Pluto WebSocket/UART bridge: '
+		if start-stop-daemon -K -q -p "$PIDFILE" -x "$DAEMON"; then
+			rm -f "$PIDFILE"
+			echo OK
+		else
+			echo FAIL
+		fi
+		;;
+	restart|reload)
+		"$0" stop
+		"$0" start
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart}"
+		exit 1
+		;;
+esac
