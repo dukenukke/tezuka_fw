@@ -1,0 +1,342 @@
+diff --git a/maia-httpd/src/lib.rs b/maia-httpd/src/lib.rs
+index 2985272..b09afc3 100644
+--- a/maia-httpd/src/lib.rs
++++ b/maia-httpd/src/lib.rs
+@@ -12,6 +12,7 @@ pub mod ddc;
+ pub mod fpga;
+ pub mod httpd;
+ pub mod iio;
++pub mod iq;
+ pub mod rxbuffer;
+ pub mod sigmf;
+ pub mod spectrometer;
+diff --git a/maia-httpd/src/app.rs b/maia-httpd/src/app.rs
+index 559acdc..3433aad 100644
+--- a/maia-httpd/src/app.rs
++++ b/maia-httpd/src/app.rs
+@@ -9,6 +9,7 @@ use crate::{
+     fpga::{InterruptHandler, IpCore},
+     httpd::{self, RecorderFinishWaiter, RecorderState},
+     iio::Ad9361,
++    iq::IqStream,
+     spectrometer::{Spectrometer, SpectrometerConfig},
+ };
+ use anyhow::Result;
+@@ -22,6 +23,7 @@ use tokio::sync::broadcast;
+ #[derive(Debug)]
+ pub struct App {
+     httpd: httpd::Server,
++    iq_stream: IqStream,
+     interrupt_handler: InterruptHandler,
+     recorder_finish: RecorderFinishWaiter,
+     spectrometer: Spectrometer,
+@@ -52,6 +54,11 @@ impl App {
+         // Build application objects
+ 
+         let (waterfall_sender, _) = broadcast::channel(16);
++        let (iq_sender, _) = broadcast::channel(4);
++        let iq_stream = IqStream::new(
++            iq_sender.clone(),
++            state.ad9361_samp_rate().await? as usize,
++        );
+         let spectrometer = Spectrometer::new(
+             state.clone(),
+             interrupt_handler.waiter_spectrometer(),
+@@ -69,11 +76,13 @@ impl App {
+             args.ca_cert.as_ref(),
+             state,
+             waterfall_sender,
++            iq_sender,
+         )
+         .await?;
+ 
+         Ok(App {
+             httpd,
++            iq_stream,
+             interrupt_handler,
+             recorder_finish,
+             spectrometer,
+@@ -87,6 +96,7 @@ impl App {
+     pub async fn run(self) -> Result<()> {
+         tokio::select! {
+             ret = self.httpd.run() => ret,
++            ret = self.iq_stream.run() => ret,
+             ret = self.interrupt_handler.run() => ret,
+             ret = self.recorder_finish.run() => ret,
+             ret = self.spectrometer.run() => ret,
+diff --git a/maia-httpd/src/httpd.rs b/maia-httpd/src/httpd.rs
+index 8f3e037..a38c8da 100644
+--- a/maia-httpd/src/httpd.rs
++++ b/maia-httpd/src/httpd.rs
+@@ -24,6 +24,7 @@ mod api;
+ mod ddc;
+ mod geolocation;
+ mod iqengine;
++mod iq_websocket;
+ mod recording;
+ mod spectrometer;
+ mod time;
+@@ -68,6 +69,7 @@ impl Server {
+         ca_cert: Option<impl AsRef<Path>>,
+         state: AppState,
+         waterfall_sender: broadcast::Sender<Bytes>,
++        iq_sender: broadcast::Sender<Bytes>,
+     ) -> Result<Server> {
+         let mut app = Router::new()
+             // all the following routes have .with_state(state)
+@@ -131,6 +133,10 @@ impl Server {
+                 "/waterfall",
+                 get(websocket::handler).with_state(waterfall_sender),
+             )
++            .route(
++                "/iq",
++                get(iq_websocket::handler).with_state(iq_sender),
++            )
+             .route("/zeros", get(zeros::get_zeros)); // used for benchmarking
+         if let Some(ca_cert) = &ca_cert {
+             // Maia SDR CA certificate
+diff --git a/maia-httpd/build.rs b/maia-httpd/build.rs
+new file mode 100644
+index 0000000..3cdcecc
+--- /dev/null
++++ b/maia-httpd/build.rs
+@@ -0,0 +1,3 @@
++fn main() {
++    println!("cargo:rustc-link-lib=iio");
++}
+diff --git a/maia-httpd/src/iq.rs b/maia-httpd/src/iq.rs
+new file mode 100644
+index 0000000..3aa6a4b
+--- /dev/null
++++ b/maia-httpd/src/iq.rs
+@@ -0,0 +1,162 @@
++//! Raw CS8 IQ streaming over WebSocket.
++
++use anyhow::{Context, Result, bail};
++use bytes::Bytes;
++use libc::{c_char, c_int, c_uint, c_void};
++use std::{ptr, slice, thread, time::Duration};
++use tokio::sync::broadcast;
++
++const MAX_BUFFER_SIZE: usize = 32_000_000;
++const MAX_TOTAL_SIZE: usize = 60_000_000;
++const MAX_KERNEL_BUFFERS: u32 = 64;
++
++enum IioContext {}
++enum IioDevice {}
++enum IioChannel {}
++enum IioBuffer {}
++
++#[link(name = "iio")]
++unsafe extern "C" {
++    fn iio_create_local_context() -> *mut IioContext;
++    fn iio_context_destroy(context: *mut IioContext);
++    fn iio_context_find_device(
++        context: *const IioContext,
++        name: *const c_char,
++    ) -> *mut IioDevice;
++    fn iio_device_get_channel(device: *const IioDevice, index: usize) -> *mut IioChannel;
++    fn iio_channel_enable(channel: *mut IioChannel);
++    fn iio_channel_disable(channel: *mut IioChannel);
++    fn iio_device_set_kernel_buffers_count(device: *const IioDevice, count: c_uint) -> c_int;
++    fn iio_device_create_buffer(
++        device: *const IioDevice,
++        samples_count: usize,
++        cyclic: bool,
++    ) -> *mut IioBuffer;
++    fn iio_buffer_destroy(buffer: *mut IioBuffer);
++    fn iio_buffer_refill(buffer: *mut IioBuffer) -> isize;
++    fn iio_buffer_first(buffer: *const IioBuffer, channel: *const IioChannel) -> *mut c_void;
++    fn iio_device_reg_read(device: *const IioDevice, address: u32, value: *mut u32) -> c_int;
++    fn iio_device_reg_write(device: *const IioDevice, address: u32, value: u32) -> c_int;
++}
++
++#[derive(Debug)]
++/// Producer for the raw CS8 IQ broadcast channel.
++pub struct IqStream {
++    sender: broadcast::Sender<Bytes>,
++    sample_rate: usize,
++}
++
++impl IqStream {
++    /// Creates an IQ producer using the current AD9361 sample rate.
++    pub fn new(sender: broadcast::Sender<Bytes>, sample_rate: usize) -> Self {
++        Self {
++            sender,
++            sample_rate,
++        }
++    }
++
++    /// Runs the blocking libiio capture loop.
++    pub async fn run(self) -> Result<()> {
++        tokio::task::spawn_blocking(move || loop {
++            while self.sender.receiver_count() == 0 {
++                thread::sleep(Duration::from_millis(20));
++            }
++            if let Err(error) = unsafe { stream_iq(&self.sender, self.sample_rate) } {
++                tracing::error!(%error, "IQ stream stopped; retrying");
++                thread::sleep(Duration::from_secs(1));
++            }
++        })
++        .await
++        .context("IQ stream worker panicked")?;
++        Ok(())
++    }
++}
++
++unsafe fn stream_iq(sender: &broadcast::Sender<Bytes>, sample_rate: usize) -> Result<()> {
++    let context = unsafe { iio_create_local_context() };
++    if context.is_null() {
++        bail!("failed to create local libiio context");
++    }
++
++    let result = unsafe { stream_iq_context(context, sender, sample_rate) };
++    unsafe { iio_context_destroy(context) };
++    result
++}
++
++unsafe fn stream_iq_context(
++    context: *mut IioContext,
++    sender: &broadcast::Sender<Bytes>,
++    sample_rate: usize,
++) -> Result<()> {
++    let rx = unsafe { iio_context_find_device(context, c"cf-ad9361-lpc".as_ptr()) };
++    if rx.is_null() {
++        bail!("cf-ad9361-lpc IIO device not found");
++    }
++    let channel_i = unsafe { iio_device_get_channel(rx, 0) };
++    let channel_q = unsafe { iio_device_get_channel(rx, 1) };
++    if channel_i.is_null() || channel_q.is_null() {
++        bail!("AD9361 RX I/Q channels not found");
++    }
++
++    unsafe {
++        iio_channel_enable(channel_i);
++        // Tezuka CS8 mode packs interleaved IQ bytes in voltage0.
++        iio_channel_disable(channel_q);
++    }
++
++    let mut block_size = (sample_rate / 20) & !0xfff;
++    block_size = block_size.clamp(4096, MAX_BUFFER_SIZE);
++    let kernel_buffers = ((MAX_TOTAL_SIZE / block_size).max(1) as u32).min(MAX_KERNEL_BUFFERS);
++    let status = unsafe { iio_device_set_kernel_buffers_count(rx, kernel_buffers) };
++    if status < 0 {
++        bail!("failed to set IIO kernel buffer count: {status}");
++    }
++
++    let buffer = unsafe { iio_device_create_buffer(rx, block_size / 4, false) };
++    if buffer.is_null() {
++        bail!("failed to create AD9361 RX buffer");
++    }
++    let result = unsafe { stream_iq_buffer(rx, channel_i, buffer, sender) };
++    unsafe { iio_buffer_destroy(buffer) };
++    result
++}
++
++unsafe fn stream_iq_buffer(
++    rx: *mut IioDevice,
++    channel_i: *mut IioChannel,
++    buffer: *mut IioBuffer,
++    sender: &broadcast::Sender<Bytes>,
++) -> Result<()> {
++    let mut status = 0;
++    unsafe {
++        if iio_device_reg_read(rx, 0x8000_0088, &mut status) == 0 {
++            iio_device_reg_write(rx, 0x8000_0088, status);
++        }
++    }
++
++    loop {
++        if sender.receiver_count() == 0 {
++            thread::sleep(Duration::from_millis(20));
++            continue;
++        }
++
++        let size = unsafe { iio_buffer_refill(buffer) };
++        if size < 0 {
++            bail!("IIO buffer refill failed: {size}");
++        }
++        let first = unsafe { iio_buffer_first(buffer, channel_i) };
++        if first == ptr::null_mut() {
++            bail!("IIO buffer returned a null data pointer");
++        }
++        let data = unsafe { slice::from_raw_parts(first.cast::<u8>(), size as usize) };
++        // Ignore the error produced when every client disconnects during refill.
++        let _ = sender.send(Bytes::copy_from_slice(data));
++
++        unsafe {
++            if iio_device_reg_read(rx, 0x8000_0088, &mut status) == 0 && status & 4 != 0 {
++                tracing::warn!("AD9361 RX overflow");
++                iio_device_reg_write(rx, 0x8000_0088, status);
++            }
++        }
++    }
++}
+diff --git a/maia-httpd/src/httpd/iq_websocket.rs b/maia-httpd/src/httpd/iq_websocket.rs
+new file mode 100644
+index 0000000..cce6b7d
+--- /dev/null
++++ b/maia-httpd/src/httpd/iq_websocket.rs
+@@ -0,0 +1,61 @@
++use axum::{
++    extract::{
++        State,
++        ws::{Message, WebSocket, WebSocketUpgrade},
++    },
++    http::StatusCode,
++    response::{IntoResponse, Response},
++};
++use bytes::Bytes;
++use futures::{SinkExt, StreamExt};
++use tokio::sync::broadcast;
++use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
++use tracing::Instrument;
++
++const MAX_CLIENTS: usize = 4;
++const METADATA: &str = r#"{"format":"cs8","channels":"iq","endianness":"iqiq"}"#;
++
++pub async fn handler(
++    State(sender): State<broadcast::Sender<Bytes>>,
++    ws: WebSocketUpgrade,
++) -> Response {
++    if sender.receiver_count() >= MAX_CLIENTS {
++        return StatusCode::SERVICE_UNAVAILABLE.into_response();
++    }
++    let receiver = sender.subscribe();
++    let span = tracing::debug_span!("iq_websocket");
++    ws.on_upgrade(move |socket| handle(socket, receiver).instrument(span))
++}
++
++async fn handle(socket: WebSocket, receiver: broadcast::Receiver<Bytes>) {
++    let (mut ws_send, mut ws_recv) = socket.split();
++    if ws_send
++        .send(Message::Text(METADATA.into()))
++        .await
++        .is_err()
++    {
++        return;
++    }
++
++    let send = BroadcastStream::new(receiver)
++        .filter_map(|item| async move {
++            match item {
++                Ok(bytes) => Some(Ok(Message::Binary(bytes))),
++                Err(BroadcastStreamRecvError::Lagged(lagged)) => {
++                    tracing::warn!(lagged, "IQ WebSocket client lagged");
++                    None
++                }
++            }
++        })
++        .forward(&mut ws_send);
++    let receive = async move {
++        while let Some(message) = ws_recv.next().await {
++            message?;
++        }
++        Ok::<(), axum::Error>(())
++    };
++    tokio::select! {
++        _ = send => {},
++        _ = receive => {},
++    }
++}
+

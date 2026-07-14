@@ -8,7 +8,7 @@
 MAIA_HTTPD_VERSION = 2637b59891bdfe38d8c5bf52c84984b3da68064e
 MAIA_HTTPD_SITE = https://github.com/F5OEO/maia-sdr/archive
 MAIA_HTTPD_SOURCE = $(MAIA_HTTPD_VERSION).tar.gz
-MAIA_HTTPD_DEPENDENCIES = host-openssl
+MAIA_HTTPD_DEPENDENCIES = host-openssl libiio
 
 # Use Buildroot's $(TARGET_CROSS) which expands to $(HOST_DIR)/bin/<prefix>-
 # and adapts per toolchain: arm-none-linux-gnueabihf- for Arm GNU, or

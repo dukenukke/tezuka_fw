@@ -7,8 +7,8 @@ config BR2_PACKAGE_PLUTO_RX
 	help
 	  Build the Pluto RX sample streaming tools.
 
-	  This installs plutorx and plutorx_ws. plutorx_ws streams CS8 IQ
-	  samples as binary WebSocket frames for browser or Android clients.
+	  This installs the plutorx command-line streaming tool. Raw CS8 IQ
+	  WebSocket streaming is provided by maia-httpd at /iq.
 
 comment "pluto_rx tools need a toolchain w/ threads"
 	depends on !BR2_TOOLCHAIN_HAS_THREADS
