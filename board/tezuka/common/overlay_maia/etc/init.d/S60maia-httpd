@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. /usr/lib/tezuka/service-env.sh
+
 wait_for_iio() {
     retries=20
     while [ "$retries" -gt 0 ]; do
@@ -12,6 +14,10 @@ wait_for_iio() {
 
 case "$1" in
     start)
+		if ! service_env_enabled enable_maia || ! service_env_enabled enable_maia_httpd; then
+			service_env_skip enable_maia_httpd "maia-httpd"
+			exit 0
+		fi
         printf "Starting maia-httpd: "
         if [ -f /usr/bin/maia-httpd.xz ]; then
             xz -d /usr/bin/maia-httpd.xz

@@ -2,9 +2,15 @@
 #
 # Load maia-sdr kernel module
 #
+. /usr/lib/tezuka/service-env.sh
+
 kernel_version=$(uname -r)
 case "$1" in
   start)
+	if ! service_env_enabled enable_maia; then
+		service_env_skip enable_maia "maia-sdr"
+		exit 0
+	fi
     
 	printf "Loading maia-sdr.ko: "
 	# Module may be in extra/ (Buildroot <2026) or updates/ (Buildroot 2026+)

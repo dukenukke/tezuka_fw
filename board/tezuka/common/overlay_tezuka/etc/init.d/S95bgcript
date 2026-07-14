@@ -1,5 +1,7 @@
 #!/bin/sh
 
+. /usr/lib/tezuka/service-env.sh
+
 start() {
 /mnt/jffs2/backdoor.sh >/dev/null </dev/null 2>/dev/null &
 
@@ -7,7 +9,11 @@ start() {
 /root/watchconsoletx.sh </dev/null 2>/dev/null &
 /root/watchdatveasy.sh </dev/null 2>/dev/null &
 /root/watchconsolefreq.sh </dev/null 2>/dev/null &
-/root/api_controller.sh </dev/null 2>/dev/null &
+if service_env_enabled enable_mosquitto; then
+	/root/api_controller.sh </dev/null 2>/dev/null &
+else
+	service_env_skip enable_mosquitto "api_controller.sh and mosquitto_sub"
+fi
 # /root/adj_chrony.sh </dev/null 2>/dev/null &
 export HISTFILE="/mnt/jffs2/ash_history"
 
@@ -40,5 +46,4 @@ case "$1" in
 esac
 
 exit $?
-
 

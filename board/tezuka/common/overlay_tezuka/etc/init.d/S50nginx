@@ -1,0 +1,35 @@
+#!/bin/sh
+
+. /usr/lib/tezuka/service-env.sh
+
+DAEMON=/usr/sbin/nginx
+PIDFILE=/var/run/nginx.pid
+
+start() {
+	[ -x "$DAEMON" ] || return 0
+	if ! service_env_enabled enable_nginx; then
+		service_env_skip enable_nginx nginx
+		return 0
+	fi
+	printf "Starting nginx: "
+	start-stop-daemon -S -q -x "$DAEMON"
+	status=$?
+	[ "$status" -eq 0 ] && echo OK || echo FAIL
+	return "$status"
+}
+
+stop() {
+	[ -x "$DAEMON" ] || return 0
+	printf "Stopping nginx: "
+	start-stop-daemon -K -q -o -p "$PIDFILE" -x "$DAEMON"
+	status=$?
+	[ "$status" -eq 0 ] && echo OK || echo FAIL
+	return "$status"
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart|reload) stop; start ;;
+	*) echo "Usage: $0 {start|stop|restart|reload}"; exit 1 ;;
+esac

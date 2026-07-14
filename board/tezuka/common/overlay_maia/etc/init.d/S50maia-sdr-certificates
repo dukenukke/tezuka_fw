@@ -3,9 +3,14 @@
 # Generate certificates for Maia SDR and store them in JFFS2 if they don't exist
 # already
 #
+. /usr/lib/tezuka/service-env.sh
 
 case "$1" in
     start)
+		if ! service_env_enabled enable_maia || ! service_env_enabled enable_maia_httpd; then
+			service_env_skip enable_maia_httpd "Maia SDR certificates"
+			exit 0
+		fi
         # ensure that JFFS2 partition on /dev/mtd2 is mounted; otherwise format it
         # and mount it
         mount | grep mtd2 > /dev/null || (flash_erase -j /dev/mtd2 0 0 && mount /mnt/jffs2)

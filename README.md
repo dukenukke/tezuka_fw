@@ -120,6 +120,66 @@ For a list all supported boards run:
 ./build.sh -h
 ```
 
+### Runtime firmware settings
+
+#### USB Ethernet mode
+
+The USB network gadget mode is selected with the `usb_ethernet_mode` U-Boot
+environment key. The setting is persistent and takes effect after a reboot.
+
+| Value | USB network function |
+| --- | --- |
+| `rndis` | RNDIS (default) |
+| `ecm` | CDC Ethernet Control Model (ECM) |
+| `ncm` | CDC Network Control Model (NCM) |
+
+```bash
+# Select a mode, then reboot
+fw_setenv usb_ethernet_mode ecm
+reboot
+
+# Inspect the current setting
+fw_printenv usb_ethernet_mode
+
+# Restore the default RNDIS mode
+fw_setenv -d usb_ethernet_mode
+reboot
+```
+
+An unset or unsupported value falls back to RNDIS.
+
+#### Service switches
+
+Services can be enabled or disabled persistently through the U-Boot
+environment. A missing variable defaults to `on`, preserving the behaviour of
+existing installations. The accepted disabled values are `off`, `no`, `false`,
+`disabled`, and `0`.
+
+| U-Boot environment key | Default | Function |
+| --- | --- | --- |
+| `enable_maia` | `on` | Load the Maia SDR kernel module. Disabling it also prevents `maia-httpd` from starting. |
+| `enable_maia_httpd` | `on` | Start `maia-httpd` and set up its certificates. |
+| `enable_mosquitto` | `on` | Start the Mosquitto MQTT broker, `/root/api_controller.sh`, and `/usr/bin/mosquitto_sub`. |
+| `enable_lighttpd` | `on` | Start Lighttpd when it is included in the firmware. |
+| `enable_nginx` | `on` | Start Nginx when it is included in the firmware. |
+
+```bash
+# Disable services and reboot
+fw_setenv enable_maia off
+fw_setenv enable_maia_httpd off
+fw_setenv enable_mosquitto off
+fw_setenv enable_lighttpd off
+fw_setenv enable_nginx off
+reboot
+
+# Enable a service again
+fw_setenv enable_mosquitto on
+reboot
+```
+
+Use `fw_printenv enable_mosquitto` to inspect a setting. Deleting a key with
+`fw_setenv -d enable_mosquitto` restores its default (`on`) behaviour.
+
 ### Upgrade Original PlutoSDR
 After building the target, use the helper script to copy the generated
 `pluto.frm` from that board output to the mounted Pluto USB drive. The script
