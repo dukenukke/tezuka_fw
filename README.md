@@ -162,6 +162,7 @@ existing installations. The accepted disabled values are `off`, `no`, `false`,
 | `enable_mosquitto` | `on` | Start the Mosquitto MQTT broker, `/root/api_controller.sh`, and `/usr/bin/mosquitto_sub`. |
 | `enable_lighttpd` | `on` | Start Lighttpd when it is included in the firmware. |
 | `enable_nginx` | `on` | Start Nginx when it is included in the firmware. |
+| `serial_ws` | `on` | On Nano, start the WebSocket/UART bridge and disable the serial command console on the second USB-C port. Set to `off` to keep the console enabled. |
 
 ```bash
 # Disable services and reboot
@@ -170,6 +171,10 @@ fw_setenv enable_maia_httpd off
 fw_setenv enable_mosquitto off
 fw_setenv enable_lighttpd off
 fw_setenv enable_nginx off
+reboot
+
+# Disable serial_ws and enable the second USB-C serial console (Nano only)
+fw_setenv serial_ws off
 reboot
 
 # Enable a service again

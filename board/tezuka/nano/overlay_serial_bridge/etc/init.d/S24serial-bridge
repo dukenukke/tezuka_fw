@@ -1,13 +1,19 @@
 #!/bin/sh
 
+. /usr/lib/tezuka/service-env.sh
+
 DAEMON=/usr/bin/serial_ws
 PIDFILE=/var/run/serial-ws.pid
 
 case "$1" in
 	start)
+		if ! service_env_enabled serial_ws; then
+			service_env_skip serial_ws "Pluto WebSocket/UART bridge"
+			exit 0
+		fi
 		printf 'Starting Pluto WebSocket/UART bridge: '
-		# Keep ttyGS0 as the emergency USB login console. Only the UART getty
-		# must be removed because this daemon owns ttyPS0 exclusively.
+		# serial_ws owns ttyPS0 exclusively, so disable its login console.
+		# When serial_ws=off this script exits above and the console stays enabled.
 		sed -i '/^ttyPS0::respawn:/d' /etc/inittab
 		if start-stop-daemon -S -b -q -m -p "$PIDFILE" -x "$DAEMON" -- \
 			-d /dev/ttyPS0 -p 7683 -r /serial; then
