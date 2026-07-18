@@ -30,19 +30,16 @@ index 559acdc..3433aad 100644
      interrupt_handler: InterruptHandler,
      recorder_finish: RecorderFinishWaiter,
      spectrometer: Spectrometer,
-@@ -52,6 +54,11 @@ impl App {
+@@ -52,6 +54,8 @@ impl App {
          // Build application objects
  
          let (waterfall_sender, _) = broadcast::channel(16);
-+        let (iq_sender, _) = broadcast::channel(4);
-+        let iq_stream = IqStream::new(
-+            iq_sender.clone(),
-+            state.ad9361_samp_rate().await? as usize,
-+        );
++        let (iq_sender, _) = broadcast::channel(1);
++        let iq_stream = IqStream::new(iq_sender.clone(), state.clone());
          let spectrometer = Spectrometer::new(
              state.clone(),
              interrupt_handler.waiter_spectrometer(),
-@@ -69,11 +76,13 @@ impl App {
+@@ -69,11 +73,13 @@ impl App {
              args.ca_cert.as_ref(),
              state,
              waterfall_sender,
@@ -56,7 +53,7 @@ index 559acdc..3433aad 100644
              interrupt_handler,
              recorder_finish,
              spectrometer,
-@@ -87,6 +96,7 @@ impl App {
+@@ -87,6 +93,7 @@ impl App {
      pub async fn run(self) -> Result<()> {
          tokio::select! {
              ret = self.httpd.run() => ret,
@@ -109,18 +106,18 @@ new file mode 100644
 index 0000000..3aa6a4b
 --- /dev/null
 +++ b/maia-httpd/src/iq.rs
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,164 @@
 +//! Raw CS8 IQ streaming over WebSocket.
 +
++use crate::app::AppState;
 +use anyhow::{Context, Result, bail};
 +use bytes::Bytes;
 +use libc::{c_char, c_int, c_uint, c_void};
-+use std::{ptr, slice, thread, time::Duration};
++use std::{ptr, slice, time::Duration};
 +use tokio::sync::broadcast;
 +
 +const MAX_BUFFER_SIZE: usize = 32_000_000;
-+const MAX_TOTAL_SIZE: usize = 60_000_000;
-+const MAX_KERNEL_BUFFERS: u32 = 64;
++const MAX_KERNEL_BUFFERS: u32 = 4;
 +
 +enum IioContext {}
 +enum IioDevice {}
@@ -155,32 +152,33 @@ index 0000000..3aa6a4b
 +/// Producer for the raw CS8 IQ broadcast channel.
 +pub struct IqStream {
 +    sender: broadcast::Sender<Bytes>,
-+    sample_rate: usize,
++    state: AppState,
 +}
 +
 +impl IqStream {
 +    /// Creates an IQ producer using the current AD9361 sample rate.
-+    pub fn new(sender: broadcast::Sender<Bytes>, sample_rate: usize) -> Self {
-+        Self {
-+            sender,
-+            sample_rate,
-+        }
++    pub fn new(sender: broadcast::Sender<Bytes>, state: AppState) -> Self {
++        Self { sender, state }
 +    }
 +
 +    /// Runs the blocking libiio capture loop.
 +    pub async fn run(self) -> Result<()> {
-+        tokio::task::spawn_blocking(move || loop {
++        loop {
 +            while self.sender.receiver_count() == 0 {
-+                thread::sleep(Duration::from_millis(20));
++                tokio::time::sleep(Duration::from_millis(20)).await;
 +            }
-+            if let Err(error) = unsafe { stream_iq(&self.sender, self.sample_rate) } {
++            let sample_rate = self.state.ad9361_samp_rate().await? as usize;
++            let sender = self.sender.clone();
++            let result = tokio::task::spawn_blocking(move || unsafe {
++                stream_iq(&sender, sample_rate)
++            })
++            .await
++            .context("IQ stream worker panicked")?;
++            if let Err(error) = result {
 +                tracing::error!(%error, "IQ stream stopped; retrying");
-+                thread::sleep(Duration::from_secs(1));
++                tokio::time::sleep(Duration::from_secs(1)).await;
 +            }
-+        })
-+        .await
-+        .context("IQ stream worker panicked")?;
-+        Ok(())
++        }
 +    }
 +}
 +
@@ -218,8 +216,7 @@ index 0000000..3aa6a4b
 +
 +    let mut block_size = (sample_rate / 20) & !0xfff;
 +    block_size = block_size.clamp(4096, MAX_BUFFER_SIZE);
-+    let kernel_buffers = ((MAX_TOTAL_SIZE / block_size).max(1) as u32).min(MAX_KERNEL_BUFFERS);
-+    let status = unsafe { iio_device_set_kernel_buffers_count(rx, kernel_buffers) };
++    let status = unsafe { iio_device_set_kernel_buffers_count(rx, MAX_KERNEL_BUFFERS) };
 +    if status < 0 {
 +        bail!("failed to set IIO kernel buffer count: {status}");
 +    }
@@ -248,13 +245,15 @@ index 0000000..3aa6a4b
 +
 +    loop {
 +        if sender.receiver_count() == 0 {
-+            thread::sleep(Duration::from_millis(20));
-+            continue;
++            return Ok(());
 +        }
 +
 +        let size = unsafe { iio_buffer_refill(buffer) };
 +        if size < 0 {
 +            bail!("IIO buffer refill failed: {size}");
++        }
++        if sender.receiver_count() == 0 {
++            return Ok(());
 +        }
 +        let first = unsafe { iio_buffer_first(buffer, channel_i) };
 +        if first == ptr::null_mut() {
@@ -292,7 +291,7 @@ index 0000000..cce6b7d
 +use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 +use tracing::Instrument;
 +
-+const MAX_CLIENTS: usize = 4;
++const MAX_CLIENTS: usize = 1;
 +const METADATA: &str = r#"{"format":"cs8","channels":"iq","endianness":"iqiq"}"#;
 +
 +pub async fn handler(
@@ -339,4 +338,3 @@ index 0000000..cce6b7d
 +        _ = receive => {},
 +    }
 +}
-

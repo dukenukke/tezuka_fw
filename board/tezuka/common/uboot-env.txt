@@ -165,10 +165,14 @@ pl_init=\
 qspiboot_bootenv=sf probe && sf read ${extraenv_load_address} 0x100000 0x20000;
 qspiboot_extraenv=sf read ${extraenv_load_address} 0xFF000 0x1000;
 set_console_args=\
-  if test "${model}" = "Nano PlutoSDR (Z7010/AD9361)"; then \
-    setenv console_arg; setenv earlyprintk_arg; setenv earlycon_arg; \
-  elif test "${model}" = "Nano SDR Board (7010-AD9363)"; then \
-    setenv console_arg; setenv earlyprintk_arg; setenv earlycon_arg; \
+  if test "${model}" = "Nano PlutoSDR (Z7010/AD9361)" || test "${model}" = "Nano SDR Board (7010-AD9363)"; then \
+    if test "${serial_ws}" = "0" || test "${serial_ws}" = "no" || test "${serial_ws}" = "off" || test "${serial_ws}" = "false" || test "${serial_ws}" = "disabled"; then \
+      setenv console_arg console=ttyPS0,115200; \
+      setenv earlyprintk_arg earlyprintk; \
+      setenv earlycon_arg earlycon; \
+    else \
+      setenv console_arg; setenv earlyprintk_arg; setenv earlycon_arg; \
+    fi; \
   else \
     setenv console_arg console=ttyPS0,115200; \
     setenv earlyprintk_arg earlyprintk; \
