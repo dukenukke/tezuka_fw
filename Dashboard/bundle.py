@@ -9,20 +9,33 @@ Usage:
   python3 bundle.py > output.html
   python3 bundle.py /path/to/output.html
 """
-import os, sys, subprocess
+import os, shutil, sys, subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 def build_signals():
-    """Rebuild vendor/signals.bundle.js via npm + esbuild."""
+    """Rebuild vendor/signals.bundle.js when its inputs have changed."""
     bundle = os.path.join(HERE, 'vendor', 'signals.bundle.js')
     entry  = os.path.join(HERE, 'signals-entry.js')
-    print('[bundle] npm install @jtarrio/signals esbuild...', file=sys.stderr)
-    subprocess.run(['npm', 'install', '@jtarrio/signals', 'esbuild'],
-                   cwd=HERE, check=True)
+    lock = os.path.join(HERE, 'package-lock.json')
+    inputs = (entry, lock, os.path.join(HERE, 'package.json'))
+    if (os.path.exists(bundle) and
+            os.path.getmtime(bundle) >= max(map(os.path.getmtime, inputs))):
+        return
+
+    npm = shutil.which('npm')
+    if npm is None:
+        raise RuntimeError(
+            'npm is required to rebuild Dashboard/vendor/signals.bundle.js; '
+            'enable BR2_PACKAGE_HOST_NODEJS for firmware builds')
+
+    print('[bundle] npm ci...', file=sys.stderr)
+    subprocess.run([npm, 'ci', '--no-audit', '--no-fund'], cwd=HERE,
+                   check=True)
     print('[bundle] esbuild signals-entry.js -> vendor/signals.bundle.js...', file=sys.stderr)
+    esbuild = os.path.join(HERE, 'node_modules', '.bin', 'esbuild')
     subprocess.run(
-        ['npx', 'esbuild', entry,
+        [esbuild, entry,
          '--bundle', '--format=iife', '--global-name=Signals',
          f'--outfile={bundle}'],
         cwd=HERE, check=True)
