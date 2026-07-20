@@ -48,3 +48,6 @@ mkdir -p "$QSPIDIR"
 
 SDIMGDIR="$BIN_DIR/sdimg"
 mkdir -p "$SDIMGDIR"
+
+JTAGDIR="$QSPIDIR/jtag"
+mkdir -p "$JTAGDIR"
