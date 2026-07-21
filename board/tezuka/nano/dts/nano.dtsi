@@ -21,11 +21,7 @@
 
 	aliases {
 		
-		serial0 = &uart0;
-	};
-
-	chosen {
-		stdout-path = "/amba@0/uart@E0001000";
+		serial0 = &uart1;
 	};
 
 	clocks {
@@ -58,7 +54,7 @@
 
                 maia_sdr_recording: maia_sdr_recording@6000000 {
                         no-map;
-                        reg = <0x6000000 0x10000000>;
+                        reg = <0x06000000 0x08000000>; /* 128 MiB */
                         label = "maia_sdr_recording";
                 };
         };
