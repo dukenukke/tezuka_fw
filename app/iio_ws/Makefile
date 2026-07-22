@@ -1,11 +1,11 @@
 
-CXX=$(CROSS_COMPILE)g++
-CC=$(CROSS_COMPILE)gcc
+CFLAGS += -O2
+LDLIBS += -liio -lwebsockets -lpthread
 
 all: iio_ws_proxy
 
 iio_ws_proxy: iio_ws_proxy.c
-	$(CC) -O2 -mfpu=neon -mfloat-abi=hard iio_ws_proxy.c -o iio_ws_proxy -liio -lwebsockets -lpthread
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
 
 clean:
 	rm -f iio_ws_proxy
