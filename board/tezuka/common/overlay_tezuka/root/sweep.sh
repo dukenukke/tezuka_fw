@@ -4,6 +4,10 @@ SPAN=480000000
 
 FREQ_MINI=47000000
 SR_MINI=2100000
+PROFILE_COUNT=8
+EDGE_TRIM_PERCENT=15
+USABLE_PERCENT=70
+AD9363_MAX_RF_BANDWIDTH=56000000
 
 if [ "$1" ]; then
     FREQ_CENTRAL=$1
@@ -17,9 +21,9 @@ else
   echo "please provide Span  : using default $SPAN"
 fi
 
-#SPAN SHOULD BE AN INTEGER !!!!
-#SPAN=$(printf "%0.f")
-SR=$((SPAN / 8 ))
+# Keep frequency geometry in integer arithmetic.  The additions implement
+# round-to-nearest for the positive span and spacing values.
+SR=$(((SPAN * 5 + 14) / 28))
 
 
 # shellcheck disable=SC2044
@@ -50,34 +54,42 @@ if [ "$SR" -lt "$SR_MINI" ]; then
   SR=$SR_MINI
 fi
 
+# Fastlock state, sample rate, bandwidth, and gain are global settings.
+iio_attr -D ad9361-phy adi,rx-fastlock-pincontrol-enable 0
+
 #disable fir if any
 echo 0 > in_out_voltage_filter_fir_en
 echo "Setting samlerate $SR"
-echo $SR > in_voltage_sampling_frequency
+echo "$SR" > in_voltage_sampling_frequency
 
-#Setup 8 Profiles SR spaced
+REQUESTED_RF_BANDWIDTH=$(((SR * 3 + 1) / 2))
+RF_BANDWIDTH=$REQUESTED_RF_BANDWIDTH
+if [ "$RF_BANDWIDTH" -gt "$AD9363_MAX_RF_BANDWIDTH" ]; then
+  RF_BANDWIDTH=$AD9363_MAX_RF_BANDWIDTH
+fi
+echo "$RF_BANDWIDTH" > in_voltage_rf_bandwidth
 
-FREQ1=$((FREQ_CENTRAL-SR*3-SR/2))
+# Set up eight profiles whose trusted central 70% regions meet edge-to-edge.
+FREQ_STEP=$(((SR * USABLE_PERCENT + 50) / 100))
+FREQ1=$((FREQ_CENTRAL - ((PROFILE_COUNT - 1) * FREQ_STEP + 1) / 2))
 
 if [ "$FREQ1" -lt "$FREQ_MINI" ]; then
   echo "Correct freq mini"
   FREQ1=$FREQ_MINI
-  FREQ_CENTRAL=$((FREQ1+SR*3+SR/2))
+  FREQ_CENTRAL=$((FREQ1 + ((PROFILE_COUNT - 1) * FREQ_STEP + 1) / 2))
 fi
 
-echo "Setup sweep staring at $FREQ1"
-for i in $(seq 0 7)
-do
-  FREQ=$((FREQ1 + i * SR ))
+echo "Fastlock geometry: profiles=$PROFILE_COUNT edge_trim=${EDGE_TRIM_PERCENT}% span=$SPAN sample_rate=$SR spacing=$FREQ_STEP first=$FREQ1 rf_bandwidth=$RF_BANDWIDTH"
+i=0
+while [ "$i" -lt "$PROFILE_COUNT" ]; do
+  FREQ=$((FREQ1 + i * FREQ_STEP))
   echo "$FREQ" > out_altvoltage0_RX_LO_frequency
   echo "Initializing PROFILE $i at $FREQ "
   echo "$i" > out_altvoltage0_RX_LO_fastlock_store
+  i=$((i + 1))
 done
 
 echo "$FREQ_CENTRAL"
-# Just to inform "normal client" what is the central frequency
-echo "$FREQ_CENTRAL" > out_altvoltage0_RX_LO_frequency
-
 
 #Enable Fastlock Mode
 iio_attr -D ad9361-phy adi,rx-fastlock-pincontrol-enable 1

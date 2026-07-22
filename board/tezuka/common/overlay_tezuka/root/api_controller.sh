@@ -3,6 +3,13 @@
 SERIAL_PORT="/dev/ttyACM0"
 MQTT_FIFO="/tmp/mqtt_fifo"
 
+# Fastlock geometry uses integer ratios so all frequency calculations remain
+# signed 64-bit integer arithmetic in bash (intmax_t), including on 32-bit ARM.
+readonly PROFILE_COUNT=8
+readonly EDGE_TRIM_PERCENT=15
+readonly USABLE_PERCENT=70
+readonly AD9363_MAX_RF_BANDWIDTH=56000000
+
 folder=$(grep -rl 'ad9361-phy' /sys/bus/iio/devices/*/name 2>/dev/null | head -1 | xargs dirname)/
 if [ -z "$folder" ] || [ "$folder" = "/" ]; then
   echo "ERROR: Could not find IIO device with name 'ad9361-phy'" >&2
@@ -394,33 +401,40 @@ do_sweep_stop () {
 do_sweep_start () {
   local FREQ_CENTRAL="$1" SPAN="$2"
   local FREQ_MINI=47000000 SR_MINI=2100000
-  # SR wider than SPAN/8: only the inner 70% of each band is used, so step = SR*0.7
-  # 8 * SR * 0.7 = SPAN  →  SR = SPAN * 5 / 28
-  local SR=$(( SPAN * 5 / 28 ))
-  [ "$SR" -lt "$SR_MINI" ] && SR=$SR_MINI
-  # Centre-to-centre spacing between adjacent sub-bands
-  local FREQ_STEP=$(( SR * 7 / 10 ))
 
+  # The central 70% of every FFT is trusted. Adjacent trusted regions meet
+  # exactly, giving eight overlapping profiles across the requested span.
+  local SR=$(( (SPAN * 5 + 14) / 28 ))
+  [ "$SR" -lt "$SR_MINI" ] && SR=$SR_MINI
+  local FREQ_STEP=$(( (SR * USABLE_PERCENT + 50) / 100 ))
+  local FREQ1=$(( FREQ_CENTRAL - ((PROFILE_COUNT - 1) * FREQ_STEP + 1) / 2 ))
+  local REQUESTED_RF_BANDWIDTH=$(( (SR * 3 + 1) / 2 ))
+  local RF_BANDWIDTH=$REQUESTED_RF_BANDWIDTH
+  [ "$RF_BANDWIDTH" -gt "$AD9363_MAX_RF_BANDWIDTH" ] && \
+    RF_BANDWIDTH=$AD9363_MAX_RF_BANDWIDTH
+
+  # Fastlock state and these receiver settings are global, never per-profile.
+  echo 0 > "${debug_folder}adi,rx-fastlock-pincontrol-enable"
   echo "manual" > "${folder}in_voltage0_gain_control_mode"
   publish_force "rx/gain_mode" "manual"
   echo 0 > "${folder}in_out_voltage_filter_fir_en"
   echo "$SR" > "${folder}in_voltage_sampling_frequency"
-  echo $(( SR * 3 / 2 )) > "${folder}in_voltage_rf_bandwidth"
+  echo "$RF_BANDWIDTH" > "${folder}in_voltage_rf_bandwidth"
 
-  local FREQ1=$(( FREQ_CENTRAL - 7 * FREQ_STEP / 2 ))
   if [ "$FREQ1" -lt "$FREQ_MINI" ]; then
     FREQ1=$FREQ_MINI
-    FREQ_CENTRAL=$(( FREQ1 + 7 * FREQ_STEP / 2 ))
+    FREQ_CENTRAL=$(( FREQ1 + ((PROFILE_COUNT - 1) * FREQ_STEP + 1) / 2 ))
   fi
 
+  echo "Fastlock geometry: profiles=$PROFILE_COUNT edge_trim=${EDGE_TRIM_PERCENT}% span=$SPAN sample_rate=$SR spacing=$FREQ_STEP first=$FREQ1 rf_bandwidth=$RF_BANDWIDTH"
   local i FREQ
-  for i in 0 1 2 3 4 5 6 7; do
+  for ((i = 0; i < PROFILE_COUNT; i++)); do
     FREQ=$(( FREQ1 + i * FREQ_STEP ))
+    echo "Fastlock profile $i center=$FREQ"
     echo "$FREQ" > "${folder}out_altvoltage0_RX_LO_frequency"
     echo "$i" > "${folder}out_altvoltage0_RX_LO_fastlock_store"
   done
 
-  echo "$FREQ_CENTRAL" > "${folder}out_altvoltage0_RX_LO_frequency"
   echo 1 > "${debug_folder}adi,rx-fastlock-pincontrol-enable"
   echo 0 > "${folder}out_altvoltage0_RX_LO_fastlock_recall"
 
